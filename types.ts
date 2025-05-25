@@ -36,3 +36,19 @@ export interface StockSummary {
   totalAvailable: number;
   totalReserved: number;
 }
+
+// Types for Income/Outcome enhancements
+export interface MovementItem {
+  materialId: string;
+  materialName: string; // For display and history
+  materialUnit: string; // For display and history
+  quantity: number;
+}
+
+export interface MovementTransaction {
+  id: string; // Unique ID for the transaction, e.g., "mov-timestamp"
+  type: 'Ingreso' | 'Egreso';
+  date: string; // ISO date string of the transaction
+  items: MovementItem[];
+  budgetTarget?: string; // Optional, only for 'Egreso'
+}

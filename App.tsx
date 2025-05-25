@@ -7,14 +7,16 @@ import RegisterWorkForm from './components/RegisterWorkForm';
 import PendingWorkList from './components/PendingWorkList';
 import PendingWorkDetail from './components/PendingWorkDetail';
 import CompletedJobsList from './components/CompletedJobsList';
-import { Material, Project, ProjectStatus, StockSummary, ProjectMaterial } from './types';
+import IncomeForm from './components/IncomeForm'; 
+import OutcomeForm from './components/OutcomeForm'; 
+import MovementHistory from './components/MovementHistory'; // New component
+import { Material, Project, ProjectStatus, StockSummary, ProjectMaterial, MovementItem, MovementTransaction } from './types';
 import { INITIAL_MATERIALS } from './constants';
-
-const API_URL = 'http://localhost:3001/api/productos';
 
 const App: React.FC = () => {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [movementHistory, setMovementHistory] = useState<MovementTransaction[]>([]);
   const [stockSummary, setStockSummary] = useState<StockSummary>({
     totalStockValue: 0,
     totalAvailable: 0,
@@ -25,28 +27,46 @@ const App: React.FC = () => {
     const savedProjectsString = localStorage.getItem('stockcontrol_projects');
     const loadedProjects: Project[] = savedProjectsString ? JSON.parse(savedProjectsString) : [];
     
+    const savedMaterialsString = localStorage.getItem('stockcontrol_materials');
+    let baseMaterials: Material[] = INITIAL_MATERIALS.map(m => ({...m, category: m.category || 'General' , reserved: 0 }));
 
-    fetch(API_URL)
-    .then(res => res.json())
-    .then(data => {
-      // Calcular reservas en base a proyectos pendientes
-      const pendingProjs = loadedProjects.filter(p => p.status === ProjectStatus.PENDIENTE);
-      const reservations: Record<string, number> = {};
-      pendingProjs.forEach(project => {
+    if (savedMaterialsString) {
+        try {
+            const parsedMaterials = JSON.parse(savedMaterialsString);
+            if (Array.isArray(parsedMaterials) && parsedMaterials.length > 0) {
+                 baseMaterials = parsedMaterials.map((m: Material) => ({
+                    ...m,
+                    category: m.category || 'General',
+                    reserved: typeof m.reserved === 'number' ? m.reserved : 0 
+                }));
+            } else if (Array.isArray(parsedMaterials) && parsedMaterials.length === 0 && INITIAL_MATERIALS.length > 0) {
+                 baseMaterials = INITIAL_MATERIALS.map(m => ({...m, category: m.category || 'General', reserved: 0 }));
+            }
+        } catch (e) {
+            console.error("Failed to parse materials from localStorage, using initial materials.", e);
+            baseMaterials = INITIAL_MATERIALS.map(m => ({...m, category: m.category || 'General', reserved: 0 }));
+        }
+    }
+    
+    const pendingProjs = loadedProjects.filter(p => p.status === ProjectStatus.PENDIENTE);
+    const reservations: Record<string, number> = {};
+    pendingProjs.forEach(project => {
         project.materials.forEach(pm => {
-          reservations[pm.materialId] = (reservations[pm.materialId] || 0) + pm.budgetedQuantity;
+            reservations[pm.materialId] = (reservations[pm.materialId] || 0) + pm.budgetedQuantity;
         });
-      });
-  
-      const correctedMaterials = data.map((m: any) => ({
-        ...m,
-        id: m.id.toString(), // Convertir id numérico a string para consistencia
-        reserved: reservations[m.id.toString()] || 0
-      }));
-  
-      setMaterials(correctedMaterials);
     });
-  
+
+    const correctedMaterials = baseMaterials.map(m => ({
+        ...m,
+        reserved: reservations[m.id] || 0 
+    }));
+    
+    const savedMovementHistoryString = localStorage.getItem('stockcontrol_movement_history');
+    const loadedMovementHistory: MovementTransaction[] = savedMovementHistoryString ? JSON.parse(savedMovementHistoryString) : [];
+
+    setProjects(loadedProjects);
+    setMaterials(correctedMaterials);
+    setMovementHistory(loadedMovementHistory);
 
   }, []);
 
@@ -70,62 +90,45 @@ const App: React.FC = () => {
   }, [materials]);
 
   useEffect(() => {
-    // Save to localStorage whenever materials or projects change
+    localStorage.setItem('stockcontrol_materials', JSON.stringify(materials));
     localStorage.setItem('stockcontrol_projects', JSON.stringify(projects));
-    calculateStockSummary(); // Recalculate summary after changes
-  }, [materials, projects, calculateStockSummary]);
+    localStorage.setItem('stockcontrol_movement_history', JSON.stringify(movementHistory));
+    calculateStockSummary();
+  }, [materials, projects, movementHistory, calculateStockSummary]);
 
 
-  const addMaterialHandler = async (newMaterialData: Omit<Material, 'id' | 'reserved'>) => {
-    try {
-      const response = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          producto: newMaterialData.name,
-          categoria: newMaterialData.category || 'General',
-          cantidad: newMaterialData.stock
-        }),
-      });
-  
-      const data = await response.json();
-  
-      setMaterials(prev => [
-        ...prev,
-        {
-          ...newMaterialData,
-          id: data.id.toString(),
-          reserved: 0,
-          category: newMaterialData.category || 'General',
-        },
-      ]);
-    } catch (error) {
-      console.error('Error agregando material:', error);
-    }
+  const addMaterialHandler = (newMaterialData: Omit<Material, 'id' | 'reserved'>) => {
+    setMaterials(prev => [
+      ...prev,
+      {
+        ...newMaterialData,
+        id: `mat-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        reserved: 0,
+        category: newMaterialData.category || 'General',
+      }
+    ]);
   };
-  
 
-  const removeMaterialHandler = async (materialId: string) => {
+  const removeMaterialHandler = (materialId: string) => {
     const materialToRemove = materials.find(m => m.id === materialId);
-  
-    if (!materialToRemove) return alert("Material no encontrado.");
+
+    if (!materialToRemove) {
+      console.warn(`Attempt to remove non-existent material ID: ${materialId}`);
+      alert("Error: Material to remove not found.");
+      return;
+    }
+
     if (materialToRemove.reserved > 0) {
-      return alert(`Material "${materialToRemove.name}" no puede eliminarse porque tiene ${materialToRemove.reserved} reservados.`);
+      alert(`Material "${materialToRemove.name}" cannot be removed: ${materialToRemove.reserved} ${materialToRemove.unit}(s) reserved.`);
+      return;
     }
-  
-    try {
-      await fetch(`${API_URL}/${materialId}`, { method: 'DELETE' });
-      setMaterials(prev => prev.filter(m => m.id !== materialId));
-    } catch (error) {
-      console.error('Error eliminando material:', error);
-    }
+    
+    setMaterials(prevMaterials => prevMaterials.filter(m => m.id !== materialId));
   };
-  
 
 
   const addProject = (project: Project) => {
     setProjects(prev => [...prev, project]);
-    // Update reservations for materials used in the new project
     setMaterials(prevMaterials =>
       prevMaterials.map(mat => {
         const projectMat = project.materials.find(pm => pm.materialId === mat.id);
@@ -141,13 +144,9 @@ const App: React.FC = () => {
   };
 
   const updateProject = (updatedProject: Project) => {
-    // This function is for saving changes like 'actualQuantity' (replanteo).
-    // It does NOT affect material reservations or stock directly.
-    // Stock and reservations are adjusted upon project completion or budget changes.
     setProjects(prevProjects =>
       prevProjects.map(p => {
         if (p.id === updatedProject.id) {
-          // Ensure deep copy of materials array and its items
           return {
             ...updatedProject,
             materials: updatedProject.materials.map(m => ({ ...m })), 
@@ -165,9 +164,7 @@ const App: React.FC = () => {
   ) => {
     setProjects(prevProjects => prevProjects.map(p => {
       if (p.id === projectId) {
-        // Prevent adding if material already exists in this project's budget
         if (p.materials.some(pm => pm.materialId === materialDetails.id)) {
-          // Alerting here might be disruptive, component should ideally prevent this call
           console.warn(`Material ${materialDetails.name} already in project ${projectId}`);
           return p; 
         }
@@ -176,18 +173,15 @@ const App: React.FC = () => {
           materialName: materialDetails.name,
           materialUnit: materialDetails.unit,
           budgetedQuantity: budgetedQuantity,
-          actualQuantity: budgetedQuantity, // Initially, actual is same as budgeted
+          actualQuantity: budgetedQuantity,
         };
-        // Create new project object with new materials array
         return { ...p, materials: [...p.materials, newProjectMaterial] };
       }
       return p;
     }));
 
-    // Update reservation for the added material
     setMaterials(prevMaterials => prevMaterials.map(m => {
       if (m.id === materialDetails.id) {
-        // Create new material object with updated reservation
         return { ...m, reserved: m.reserved + budgetedQuantity };
       }
       return m;
@@ -203,24 +197,20 @@ const App: React.FC = () => {
         if (materialBeingRemoved) {
           removedBudgetedQuantity = materialBeingRemoved.budgetedQuantity;
         }
-        // Create new project object with filtered materials array
         return { ...p, materials: p.materials.filter(pm => pm.materialId !== materialIdToRemove) };
       }
       return p;
     }));
 
-    // If a material was actually removed and had a budgeted quantity, update reservations
     if (removedBudgetedQuantity > 0) {
       setMaterials(prevMaterials => prevMaterials.map(m => {
         if (m.id === materialIdToRemove) {
-          // Create new material object with updated reservation
           return { ...m, reserved: Math.max(0, m.reserved - removedBudgetedQuantity) };
         }
         return m;
       }));
     }
   };
-
 
   const completeProject = (projectId: string, finalMaterialsFromProject: ProjectMaterial[]) => {
     const projectToComplete = projects.find(p=>p.id === projectId);
@@ -232,11 +222,9 @@ const App: React.FC = () => {
     setProjects(prevProjects =>
       prevProjects.map(p => {
         if (p.id === projectId) {
-          // Create new project object for the completed project
           return { 
             ...p, 
             status: ProjectStatus.COMPLETADO, 
-            // Ensure deep copy of final materials
             materials: finalMaterialsFromProject.map(fm => ({...fm})), 
             completionDate: new Date().toISOString() 
           };
@@ -245,27 +233,76 @@ const App: React.FC = () => {
       })
     );
 
-    // Adjust stock and reservations for materials
     setMaterials(prevMaterials =>
       prevMaterials.map(mat => {
         const materialUsedInProject = finalMaterialsFromProject.find(pm => pm.materialId === mat.id);
         const originalBudgetedForProject = projectToComplete.materials.find(pm => pm.materialId === mat.id);
 
-        if (originalBudgetedForProject) { // If this material was part of the project's budget
+        if (originalBudgetedForProject) {
           const actualQuantityUsed = materialUsedInProject ? materialUsedInProject.actualQuantity : 0;
           const newStock = mat.stock - actualQuantityUsed;
           const newReserved = mat.reserved - originalBudgetedForProject.budgetedQuantity;
           
-          // Create new material object with updated stock and reservations
           return {
             ...mat,
-            stock: Math.max(0, newStock), // Prevent negative stock
-            reserved: Math.max(0, newReserved), // Prevent negative reservations
+            stock: Math.max(0, newStock),
+            reserved: Math.max(0, newReserved),
           };
         }
-        return mat; // Return original material if not affected
+        return mat;
       })
     );
+  };
+
+  const handleStockIncome = (itemsToIncome: MovementItem[], incomeDate: string) => {
+    setMaterials(prevMaterials => {
+      const updatedMaterials = [...prevMaterials];
+      itemsToIncome.forEach(item => {
+        const materialIndex = updatedMaterials.findIndex(mat => mat.id === item.materialId);
+        if (materialIndex !== -1) {
+          updatedMaterials[materialIndex] = {
+            ...updatedMaterials[materialIndex],
+            stock: updatedMaterials[materialIndex].stock + item.quantity,
+          };
+        }
+      });
+      return updatedMaterials;
+    });
+
+    const newTransaction: MovementTransaction = {
+      id: `mov-${Date.now()}`,
+      type: 'Ingreso',
+      date: incomeDate,
+      items: itemsToIncome,
+    };
+    setMovementHistory(prevHistory => [newTransaction, ...prevHistory]);
+  };
+
+  const handleStockOutcome = (itemsToOutcome: MovementItem[], outcomeDate: string, budgetTarget?: string) => {
+    setMaterials(prevMaterials => {
+      const updatedMaterials = [...prevMaterials];
+      itemsToOutcome.forEach(item => {
+        const materialIndex = updatedMaterials.findIndex(mat => mat.id === item.materialId);
+        if (materialIndex !== -1) {
+          const currentMat = updatedMaterials[materialIndex];
+          const newStock = currentMat.stock - item.quantity;
+          updatedMaterials[materialIndex] = {
+            ...currentMat,
+            stock: Math.max(currentMat.reserved, newStock), // Ensure stock doesn't go below reserved
+          };
+        }
+      });
+      return updatedMaterials;
+    });
+    
+    const newTransaction: MovementTransaction = {
+      id: `mov-${Date.now()}`,
+      type: 'Egreso',
+      date: outcomeDate,
+      items: itemsToOutcome,
+      budgetTarget: budgetTarget,
+    };
+    setMovementHistory(prevHistory => [newTransaction, ...prevHistory]);
   };
 
   const pendingProjects = projects.filter(p => p.status === ProjectStatus.PENDIENTE);
@@ -286,6 +323,18 @@ const App: React.FC = () => {
               />
             } 
           />
+          <Route 
+            path="/registrar-ingreso" 
+            element={<IncomeForm materials={materials} onStockIncome={handleStockIncome} />} 
+          />
+          <Route 
+            path="/registrar-egreso" 
+            element={<OutcomeForm materials={materials} onStockOutcome={handleStockOutcome} />} 
+          />
+          <Route 
+            path="/historial-movimientos" 
+            element={<MovementHistory history={movementHistory} />} 
+          />
           <Route path="/registrar-trabajo" element={<RegisterWorkForm materials={materials} addProject={addProject} />} />
           <Route 
             path="/trabajos-pendientes" 
@@ -295,8 +344,8 @@ const App: React.FC = () => {
             path="/trabajo/:projectId" 
             element={
               <PendingWorkDetail 
-                projects={projects} // Pass all projects so detail can find its own
-                materials={materials} // Pass all materials for reference and adding
+                projects={projects} 
+                materials={materials}
                 updateProject={updateProject} 
                 completeProject={completeProject}
                 addMaterialToExistingProject={addMaterialToExistingProject}

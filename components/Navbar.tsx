@@ -24,6 +24,24 @@ const Navbar: React.FC = () => {
                 Visión General
               </NavLink>
               <NavLink 
+                to="/registrar-ingreso"
+                className={({ isActive }) => `${linkClass} ${isActive ? activeLinkClass : inactiveLinkClass}`}
+              >
+                Registrar Ingreso
+              </NavLink>
+              <NavLink 
+                to="/registrar-egreso"
+                className={({ isActive }) => `${linkClass} ${isActive ? activeLinkClass : inactiveLinkClass}`}
+              >
+                Registrar Egreso
+              </NavLink>
+              <NavLink 
+                to="/historial-movimientos"
+                className={({ isActive }) => `${linkClass} ${isActive ? activeLinkClass : inactiveLinkClass}`}
+              >
+                Historial Movimientos
+              </NavLink>
+              <NavLink 
                 to="/registrar-trabajo"
                 className={({ isActive }) => `${linkClass} ${isActive ? activeLinkClass : inactiveLinkClass}`}
               >
@@ -50,4 +68,3 @@ const Navbar: React.FC = () => {
 };
 
 export default Navbar;
-    
