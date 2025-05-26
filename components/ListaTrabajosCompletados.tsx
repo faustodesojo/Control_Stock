@@ -1,13 +1,36 @@
-
-import React from 'react';
-import { Project } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Project, ProjectStatus } from '../types';
 // import { EyeIcon } from '../constants'; // Assuming you might add a view detail later
-
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../firebaseService'; // Import db from firebaseService
 interface CompletedJobsListProps {
-  projects: Project[];
+  // projects: Project[]; // Removed prop
 }
-
-const CompletedJobsList: React.FC<CompletedJobsListProps> = ({ projects }) => {
+const ListaTrabajosCompletados: React.FC<CompletedJobsListProps> = () => { // Removed projects from destructuring
+  const [completedProjects, setCompletedProjects] = useState<Project[]>([]); // State for completed projects
+  const [loading, setLoading] = useState<boolean>(true); // Loading state
+  useEffect(() => {
+    const fetchCompletedProjects = async () => {
+      setLoading(true);
+      try {
+        // Create a query to get projects where status is 'COMPLETADO'
+        const q = query(collection(db, 'proyectos'), where('status', '==', ProjectStatus.COMPLETADO));
+        const querySnapshot = await getDocs(q);
+        const projectsData: Project[] = [];
+        querySnapshot.forEach((doc) => {
+          // Include the document ID and cast the data to Project type
+          projectsData.push({ id: doc.id, ...doc.data() as Omit<Project, 'id'> });
+        });
+        setCompletedProjects(projectsData);
+      } catch (error) {
+        console.error("Error fetching completed projects: ", error);
+        // Optionally show an error message to the user
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchCompletedProjects();
+  }, []); // Empty dependency array means this effect runs once on mount
   return (
     <div className="bg-white p-6 sm:p-8 rounded-lg shadow-md">
       <h1 className="text-3xl font-bold text-gray-800 mb-6">Trabajos Completados</h1>
@@ -15,7 +38,7 @@ const CompletedJobsList: React.FC<CompletedJobsListProps> = ({ projects }) => {
         <p className="text-center text-gray-500 py-4">No hay trabajos completados.</p>
       ) : (
         <div className="space-y-4">
-          {projects.map(project => (
+          {completedProjects.map(project => ( // Use completedProjects state
             <div key={project.id} className="p-4 border border-gray-200 rounded-lg bg-green-50">
               <div className="flex justify-between items-start">
                 <div>
@@ -49,5 +72,4 @@ const CompletedJobsList: React.FC<CompletedJobsListProps> = ({ projects }) => {
     </div>
   );
 };
-
-export default CompletedJobsList;
+export default ListaTrabajosCompletados;

@@ -4,7 +4,7 @@ import { NavLink } from 'react-router-dom';
 import { APP_TITLE } from '../constants';
 
 const Navbar: React.FC = () => {
-  const linkClass = "px-3 py-2 rounded-md text-sm font-medium";
+const linkClass = "px-3 py-2 rounded-md text-sm font-medium";
   const activeLinkClass = "bg-primary-700 text-white";
   const inactiveLinkClass = "text-gray-300 hover:bg-primary-600 hover:text-white";
 

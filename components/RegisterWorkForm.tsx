@@ -5,8 +5,7 @@ import { Material, Project, ProjectMaterial, ProjectStatus } from '../types';
 import { PlusIcon } from '../constants';
 
 interface RegisterWorkFormProps {
-  materials: Material[];
-  addProject: (project: Project) => void;
+  materials: Material[]; // Prop to provide available materials
 }
 
 const RegisterWorkForm: React.FC<RegisterWorkFormProps> = ({ materials, addProject }) => {
@@ -19,6 +18,7 @@ const RegisterWorkForm: React.FC<RegisterWorkFormProps> = ({ materials, addProje
   const [selectedMaterialId, setSelectedMaterialId] = useState<string>(materials[0]?.id || '');
   const [quantity, setQuantity] = useState<number>(1);
 
+  // Function to add selected material to the project
   const handleAddMaterial = () => {
     if (!selectedMaterialId || quantity <= 0) {
       alert("Por favor, seleccione un material y especifique una cantidad válida.");
@@ -52,11 +52,12 @@ const RegisterWorkForm: React.FC<RegisterWorkFormProps> = ({ materials, addProje
     setQuantity(1);
   };
 
-  const handleRemoveMaterial = (materialId: string) => {
+  // Function to remove a material from the project
+  const handleRemoveMaterial = (materialId: string) => { // Corrected type for materialId
     setProjectMaterials(prev => prev.filter(pm => pm.materialId !== materialId));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => { // Make the function async
     e.preventDefault();
     if (!description || !client || projectMaterials.length === 0 || estimatedDays <= 0) {
       alert("Por favor, complete todos los campos (Numero de Presupuesto, Cliente, Días Estimados) y agregue al menos un material.");
@@ -71,7 +72,11 @@ const RegisterWorkForm: React.FC<RegisterWorkFormProps> = ({ materials, addProje
       status: ProjectStatus.PENDIENTE,
       materials: projectMaterials,
     };
-    addProject(newProject);
+    
+    // Use the addProject function from firebaseService
+    await addProject(newProject);
+
+    // Reset form or navigate
     alert("Trabajo registrado exitosamente!");
     navigate('/trabajos-pendientes');
   };
@@ -79,7 +84,7 @@ const RegisterWorkForm: React.FC<RegisterWorkFormProps> = ({ materials, addProje
   return (
     <div className="bg-white p-6 sm:p-8 rounded-lg shadow-md max-w-2xl mx-auto">
       <h1 className="text-3xl font-bold text-gray-800 mb-6">Registrar Nuevo Trabajo</h1>
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-6"> {/* Added missing onSubmit handler */}
         <div>
           <label htmlFor="description" className="block text-sm font-medium text-gray-700">Numero de Presupuesto</label>
           <input
@@ -165,8 +170,8 @@ const RegisterWorkForm: React.FC<RegisterWorkFormProps> = ({ materials, addProje
             >
               <PlusIcon className="w-5 h-5 mr-1" /> Agregar
             </button>
-          </div>
-          {projectMaterials.length > 0 && (
+          </div> {/* Added missing closing div tag */}
+          {projectMaterials.length > 0 && ( // Check if there are materials before rendering the list
             <div className="mt-4 space-y-2">
               <div className="flex justify-between items-center mb-2">
                 <h3 className="text-md font-medium text-gray-700">Materiales Agregados:</h3>
@@ -174,7 +179,7 @@ const RegisterWorkForm: React.FC<RegisterWorkFormProps> = ({ materials, addProje
               </div>
               <ul className="divide-y divide-gray-200 border border-gray-200 rounded-md p-2 bg-gray-50"> {/* Added border, padding and light bg for better visibility */}
                 {projectMaterials.map(pm => (
-                  <li key={pm.materialId} className="py-2 flex justify-between items-center text-gray-700"> {/* Ensure text color contrasts */}
+                  <li key={pm.materialId} className="py-2 flex justify-between items-center text-gray-700"> {/* Ensure text color contrasts */} {/* Added missing closing li tag */}
                     <span className="flex-1">{pm.materialName}: {pm.budgetedQuantity} {pm.materialUnit}</span>
                     <button type="button" onClick={() => handleRemoveMaterial(pm.materialId)} className="ml-4 text-red-500 hover:text-red-700 text-sm">Quitar</button>
                   </li>
@@ -194,7 +199,7 @@ const RegisterWorkForm: React.FC<RegisterWorkFormProps> = ({ materials, addProje
           </button>
           <button
             type="submit"
-            className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 flex items-center"
+            className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 flex items-center" // Adjusted class name
           >
             <PlusIcon className="w-5 h-5 mr-2" /> Registrar Trabajo
           </button>

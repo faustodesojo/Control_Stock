@@ -1,22 +1,40 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Material, MovementItem } from '../types';
 import { ArrowDownTrayIcon, PlusIcon, TrashIcon } from '../constants';
+import { processStockOutcome, getMaterials } from '../firebaseService'; // Import Firestore functions
 
 interface OutcomeFormProps {
-  materials: Material[];
-  onStockOutcome: (itemsToOutcome: MovementItem[], outcomeDate: string, budgetTarget?: string) => void;
+ // No props needed as materials will be fetched internally
 }
-
-const OutcomeForm: React.FC<OutcomeFormProps> = ({ materials, onStockOutcome }) => {
+ 
+const FormularioEgresos: React.FC<OutcomeFormProps> = () => { 
   const navigate = useNavigate();
   const [outcomeItems, setOutcomeItems] = useState<MovementItem[]>([]);
   const [selectedMaterialId, setSelectedMaterialId] = useState<string>('');
   const [quantity, setQuantity] = useState<number>(1);
   const [outcomeDate, setOutcomeDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [materials, setMaterials] = useState<Material[]>([]); // State for materials
+  const [loading, setLoading] = useState<boolean>(true); // State for initial material loading
   const [budgetTarget, setBudgetTarget] = useState<string>('');
 
+  useEffect(() => {
+    const fetchMaterials = async () => {
+      try {
+        const materialsData = await getMaterials();
+        setMaterials(materialsData);
+      } catch (error) {
+        console.error('Error fetching materials:', error);
+        // Handle error appropriately (e.g., show error message)
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchMaterials();
+  }, []); // Empty dependency array means this runs once on mount
+
+  const [submitting, setSubmitting] = useState<boolean>(false); // Add submitting state
   const availableMaterialsForSelection = useMemo(() => {
     return materials
       .map(m => ({
@@ -67,8 +85,9 @@ const OutcomeForm: React.FC<OutcomeFormProps> = ({ materials, onStockOutcome }) 
     setOutcomeItems(prev => prev.filter(item => item.materialId !== materialId));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => { // Make handleSubmit async
     e.preventDefault();
+
     if (outcomeItems.length === 0) {
       alert("Por favor, agregue al menos un material a la lista de egresos.");
       return;
@@ -85,27 +104,40 @@ const OutcomeForm: React.FC<OutcomeFormProps> = ({ materials, onStockOutcome }) 
             return;
         }
     }
-    
-    onStockOutcome(outcomeItems, outcomeDate, budgetTarget);
-    let alertMessage = `Egreso de ${outcomeItems.length} tipo(s) de material(es) registrado exitosamente para la fecha ${new Date(outcomeDate).toLocaleDateString()}.`;
-    if (budgetTarget) {
-        alertMessage += ` Asociado al presupuesto/referencia: ${budgetTarget}.`;
+
+    setSubmitting(true); // Start submitting state
+
+    try {
+      await processStockOutcome(outcomeItems, outcomeDate, budgetTarget); // Call Firestore function
+      let alertMessage = `Egreso de ${outcomeItems.length} tipo(s) de material(es) registrado exitosamente para la fecha ${new Date(outcomeDate).toLocaleDateString()}.`;
+      if (budgetTarget) {
+          alertMessage += ` Asociado al presupuesto/referencia: ${budgetTarget}.`;
+      }
+      alert(alertMessage);
+
+      // Reset form state after successful submission
+      setOutcomeItems([]);
+      setSelectedMaterialId('');
+      setQuantity(1);
+      setOutcomeDate(new Date().toISOString().split('T')[0]);
+      setBudgetTarget('');
     }
-    alert(alertMessage);
-    setOutcomeItems([]);
-    setSelectedMaterialId('');
-    setQuantity(1);
-    setOutcomeDate(new Date().toISOString().split('T')[0]);
-    setBudgetTarget('');
-    // navigate('/');
+     finally {
+      setSubmitting(false); // End submitting state
+    }
   };
 
   return (
     <div className="bg-white p-6 sm:p-8 rounded-lg shadow-md max-w-2xl mx-auto">
-      <h1 className="text-3xl font-bold text-gray-800 mb-6">Registrar Egreso de Materiales (Múltiple)</h1>
+      <h1 className="text-3xl font-bold text-gray-800 mb-6">Registrar Egreso de Materiales</h1>
       
       <div className="space-y-4 border-b border-gray-200 pb-6 mb-6">
         <h2 className="text-xl font-semibold text-gray-700">Agregar Material al Egreso</h2>
+         {loading ? (
+           <p className="text-center text-gray-500">Cargando materiales...</p>
+         ) : materials.length === 0 ? (
+           <p className="text-center text-gray-500">No hay materiales registrados para egresar.</p>
+         ) : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
           <div className="md:col-span-2">
             <label htmlFor="material" className="block text-sm font-medium text-gray-700">Material</label>
@@ -139,6 +171,7 @@ const OutcomeForm: React.FC<OutcomeFormProps> = ({ materials, onStockOutcome }) 
             />
           </div>
         </div>
+         )}
         <button
           type="button"
           onClick={handleAddMaterialToList}
@@ -209,7 +242,7 @@ const OutcomeForm: React.FC<OutcomeFormProps> = ({ materials, onStockOutcome }) 
           </button>
           <button
             type="submit"
-            disabled={outcomeItems.length === 0}
+            disabled={outcomeItems.length === 0 || submitting} // Disable when no items or submitting
             className="px-6 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <ArrowDownTrayIcon className="w-5 h-5 mr-2" /> Registrar Egreso Total
@@ -220,4 +253,4 @@ const OutcomeForm: React.FC<OutcomeFormProps> = ({ materials, onStockOutcome }) 
   );
 };
 
-export default OutcomeForm;
+export default FormularioEgresos;

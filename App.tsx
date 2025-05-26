@@ -1,19 +1,21 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
+
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import StockOverview from './components/StockOverview';
 import RegisterWorkForm from './components/RegisterWorkForm';
-import PendingWorkList from './components/PendingWorkList';
-import PendingWorkDetail from './components/PendingWorkDetail';
-import CompletedJobsList from './components/CompletedJobsList';
-import IncomeForm from './components/IncomeForm'; 
-import OutcomeForm from './components/OutcomeForm'; 
-import MovementHistory from './components/MovementHistory'; // New component
-import { Material, Project, ProjectStatus, StockSummary, ProjectMaterial, MovementItem, MovementTransaction } from './types';
+import PendingWorkList from './components/ListaTrabajosPendientes';
+import PendingWorkDetail from './components/DetalleTrabajoPendiente';
+import CompletedJobsList from './components/ListaTrabajosCompletados';
+import IncomeForm from './components/FormularioIngresos'; 
+import OutcomeForm from './components/FormularioEgresos'; 
+import MovementHistory from './components/HistorialMovimientos'; // New component
+import { Material, Project, ProjectStatus, StockSummary, ProjectMaterial, MovementItem, MovementTransaction, ProjectData } from './types';
 import { INITIAL_MATERIALS } from './constants';
+import * as firebaseService from './firebaseService'; // Import as firebaseService to avoid naming conflict
 
 const App: React.FC = () => {
+  const [loadingInitialData, setLoadingInitialData] = useState<boolean>(true);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [movementHistory, setMovementHistory] = useState<MovementTransaction[]>([]);
@@ -23,32 +25,86 @@ const App: React.FC = () => {
     totalReserved: 0,
   });
 
-  useEffect(() => {
-    const savedProjectsString = localStorage.getItem('stockcontrol_projects');
-    const loadedProjects: Project[] = savedProjectsString ? JSON.parse(savedProjectsString) : [];
-    
-    const savedMaterialsString = localStorage.getItem('stockcontrol_materials');
-    let baseMaterials: Material[] = INITIAL_MATERIALS.map(m => ({...m, category: m.category || 'General' , reserved: 0 }));
+ // Helper function to calculate stock summary
+ const calculateStockSummary = useCallback(() => {
+    let totalStock = 0;
+    let totalReservedCalculated = 0;
+    let totalAvailable = 0;
+ materials.forEach(material => {
+ totalStock += material.stock;
+ totalReservedCalculated += material.reserved;
+ totalAvailable += (material.stock - material.reserved);
+ });
+ setStockSummary({ totalStockValue: totalStock, totalAvailable: totalAvailable, totalReserved: totalReservedCalculated });
+  }, [materials, setStockSummary]);
 
+ // Helper function to load materials from local storage as a fallback
+ const loadMaterialsFromLocalStorage = useCallback(() => {
+    const savedMaterialsString = localStorage.getItem('stockcontrol_materials'); // Still using local storage for initial fallback
+    let baseMaterials: Material[] = INITIAL_MATERIALS.map(m => ({...m, category: m.category || 'General' , reserved: 0 }));
     if (savedMaterialsString) {
-        try {
-            const parsedMaterials = JSON.parse(savedMaterialsString);
-            if (Array.isArray(parsedMaterials) && parsedMaterials.length > 0) {
-                 baseMaterials = parsedMaterials.map((m: Material) => ({
-                    ...m,
-                    category: m.category || 'General',
-                    reserved: typeof m.reserved === 'number' ? m.reserved : 0 
-                }));
+          try {
+              const parsedMaterials = JSON.parse(savedMaterialsString);
+              if (Array.isArray(parsedMaterials) && parsedMaterials.length > 0) {
+                 baseMaterials = parsedMaterials.map(m => ({...m, category: m.category || 'General', reserved: 0}));
             } else if (Array.isArray(parsedMaterials) && parsedMaterials.length === 0 && INITIAL_MATERIALS.length > 0) {
                  baseMaterials = INITIAL_MATERIALS.map(m => ({...m, category: m.category || 'General', reserved: 0 }));
             }
         } catch (e) {
             console.error("Failed to parse materials from localStorage, using initial materials.", e);
-            baseMaterials = INITIAL_MATERIALS.map(m => ({...m, category: m.category || 'General', reserved: 0 }));
         }
     }
+     setMaterials(baseMaterials); // Load base materials without reserved calculated yet
+ }, [setMaterials, INITIAL_MATERIALS]);
+
+ // Fetch materials from Firebase or use fallback
+  const fetchMaterials = useCallback(async () => {
+    try {
+      const dbMaterials = await firebaseService.getMaterials();
+      console.log("Datos de materiales recuperados de Firebase:", dbMaterials); // <-- Nuevo console.log aquí
+      if (dbMaterials && dbMaterials.length > 0) {
+        setMaterials(dbMaterials.map(m => ({ ...m, reserved: 0 }))); // Load base materials from DB without reserved calculated yet
+      } else {
+        // If database is empty, use localStorage or initial materials
+        loadMaterialsFromLocalStorage();
+      }
+    } catch (error) {
+      console.error("Error fetching materials from Firebase:", error);
+      // Fallback to localStorage or initial materials on error
+      loadMaterialsFromLocalStorage();
+    }
+  }, [setMaterials, loadMaterialsFromLocalStorage]); // Added loadMaterialsFromLocalStorage as dependency
+
+  const fetchProjects = useCallback(async () => {
+      try {
+        const dbProjects = await firebaseService.getProjects();
+        if (dbProjects) {
+          setProjects(dbProjects);
+        } else {
+          console.log("No projects found in Firebase or failed to fetch.");
+        }
+      } catch (error) {
+        console.error("Error fetching projects from Firebase:", error);
+      }
+    }, [setProjects]);
+
+  // Initial data fetching (materials and projects)
+  useEffect(() => {
+    const loadedMovementHistory: MovementTransaction[] = localStorage.getItem('stockcontrol_movement_history') ? JSON.parse(localStorage.getItem('stockcontrol_movement_history')!) : []; // Still loading movement history from local storage
     
-    const pendingProjs = loadedProjects.filter(p => p.status === ProjectStatus.PENDIENTE);
+    const loadInitialData = async () => {
+ await fetchMaterials();
+      await fetchProjects();
+      setMovementHistory(loadedMovementHistory);
+      setLoadingInitialData(false); // Set loading to false after both fetches
+    }
+    loadInitialData();
+
+  }, []);
+
+  // Effect to calculate and set reserved materials whenever projects change
+ useEffect(() => {
+    const pendingProjs = projects.filter(p => p.status === ProjectStatus.PENDIENTE);
     const reservations: Record<string, number> = {};
     pendingProjs.forEach(project => {
         project.materials.forEach(pm => {
@@ -56,41 +112,27 @@ const App: React.FC = () => {
         });
     });
 
-    const correctedMaterials = baseMaterials.map(m => ({
-        ...m,
-        reserved: reservations[m.id] || 0 
-    }));
-    
-    const savedMovementHistoryString = localStorage.getItem('stockcontrol_movement_history');
-    const loadedMovementHistory: MovementTransaction[] = savedMovementHistoryString ? JSON.parse(savedMovementHistoryString) : [];
-
-    setProjects(loadedProjects);
-    setMaterials(correctedMaterials);
-    setMovementHistory(loadedMovementHistory);
-
-  }, []);
-
-
-  const calculateStockSummary = useCallback(() => {
-    let totalStock = 0;
-    let totalReservedCalculated = 0;
-    let totalAvailable = 0;
-
-    materials.forEach(material => {
-      totalStock += material.stock;
-      totalReservedCalculated += material.reserved;
-      totalAvailable += (material.stock - material.reserved);
+    // Calculate the new materials state based on calculated reservations
+    const newMaterialsWithReservations = materials.map(mat => {
+      return { ...mat, reserved: reservations[mat.id] || 0 };
     });
 
-    setStockSummary({
-      totalStockValue: totalStock,
-      totalAvailable: totalAvailable,
-      totalReserved: totalReservedCalculated,
+    // Compare the new materials state with the current state
+    // Check if the reserved quantities have actually changed
+    const hasReservedChanged = newMaterialsWithReservations.some((newMat, index) => {
+        const oldMat = materials[index];
+        return newMat.reserved !== oldMat.reserved;
     });
-  }, [materials]);
 
+    // Only update state if reservations have changed to avoid infinite loop
+    if (hasReservedChanged) {
+      setMaterials(newMaterialsWithReservations);
+    }
+
+  }, [projects, materials]); // Ensure both projects and materials are dependencies
+
+  // Effect to save data to localStorage and calculate stock summary whenever relevant state changes
   useEffect(() => {
-    localStorage.setItem('stockcontrol_materials', JSON.stringify(materials));
     localStorage.setItem('stockcontrol_projects', JSON.stringify(projects));
     localStorage.setItem('stockcontrol_movement_history', JSON.stringify(movementHistory));
     calculateStockSummary();
@@ -127,20 +169,20 @@ const App: React.FC = () => {
   };
 
 
-  const addProject = (project: Project) => {
-    setProjects(prev => [...prev, project]);
-    setMaterials(prevMaterials =>
-      prevMaterials.map(mat => {
-        const projectMat = project.materials.find(pm => pm.materialId === mat.id);
-        if (projectMat) {
-          return {
-            ...mat,
-            reserved: mat.reserved + projectMat.budgetedQuantity,
-          };
-        }
-        return mat;
-      })
-    );
+  const addProject = async (projectData: Omit<Project, 'id'>) => {
+    try {
+      // Add the project to Firestore
+      // Note: The firebaseService.addProject function expects ProjectData, which is Omit<Project, 'id'>
+      // This matches the type of projectData received here.
+      const projectId = await firebaseService.addProject(projectData);
+
+      // Update local state with the project including the Firestore ID
+      const newProjectWithId: Project = { ...projectData, id: projectId };
+      setProjects(prev => [...prev, newProjectWithId]);
+    } catch (error) {
+      console.error("Error adding project to Firebase:", error);      
+      alert("Error al registrar el trabajo. Intente de nuevo."); // User feedback
+    }
   };
 
   const updateProject = (updatedProject: Project) => {
@@ -308,6 +350,11 @@ const App: React.FC = () => {
   const pendingProjects = projects.filter(p => p.status === ProjectStatus.PENDIENTE);
   const completedProjects = projects.filter(p => p.status === ProjectStatus.COMPLETADO);
 
+
+  if (loadingInitialData) {
+    return <div className="text-center py-10 text-gray-700">Cargando datos iniciales...</div>;
+  }
+
   return (
     <HashRouter>
       <Layout>
@@ -350,6 +397,7 @@ const App: React.FC = () => {
                 completeProject={completeProject}
                 addMaterialToExistingProject={addMaterialToExistingProject}
                 removeMaterialFromExistingProject={removeMaterialFromExistingProject}
+                refetchProjects={fetchProjects}
               />
             } 
           />

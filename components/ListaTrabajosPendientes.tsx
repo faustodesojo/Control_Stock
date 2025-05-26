@@ -1,24 +1,21 @@
-
 import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Project, Material } from '../types';
 import { PencilSquareIcon } from '../constants';
 
 interface PendingWorkListProps {
-  projects: Project[];
+  projects: Project[]; // Restore the prop
   allMaterials: Material[]; // For filter dropdown
 }
 
-const PendingWorkList: React.FC<PendingWorkListProps> = ({ projects, allMaterials }) => {
+const ListaTrabajosPendientes: React.FC<PendingWorkListProps> = ({ projects, allMaterials }) => {
   const [filterMaterialId, setFilterMaterialId] = useState<string>('');
 
   const filteredProjects = useMemo(() => {
     if (!filterMaterialId) {
       return projects;
     }
-    return projects.filter(project =>
-      project.materials.some(pm => pm.materialId === filterMaterialId)
-    );
+    return projects.filter(project => project.materials.some(pm => pm.materialId === filterMaterialId));
   }, [projects, filterMaterialId]);
 
   return (
@@ -85,4 +82,4 @@ const PendingWorkList: React.FC<PendingWorkListProps> = ({ projects, allMaterial
   );
 };
 
-export default PendingWorkList;
+export default ListaTrabajosPendientes;

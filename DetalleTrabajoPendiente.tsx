@@ -1,53 +1,50 @@
-
-
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Project, ProjectMaterial, Material, ProjectStatus } from '../types';
 import { CheckCircleIcon, PlusIcon, TrashIcon } from '../constants';
+import { getProjectById, updateProjectInFirestore, completeProjectInFirestore, addMaterialToProjectInFirestore, removeMaterialFromProjectInFirestore } from '../firebaseService';
 
 interface PendingWorkDetailProps {
-  projects: Project[]; // All projects, detail will find its own
   materials: Material[]; // All available materials in the system
-  updateProject: (updatedProject: Project) => void;
-  completeProject: (projectId: string, finalMaterials: ProjectMaterial[]) => void;
-  addMaterialToExistingProject: (
-    projectId: string, 
-    materialDetails: { id: string; name: string; unit: string }, 
-    budgetedQuantity: number
-  ) => void;
-  removeMaterialFromExistingProject: (projectId: string, materialIdToRemove: string) => void;
+  refetchProjects: () => Promise<void>;
 }
-
-const PendingWorkDetail: React.FC<PendingWorkDetailProps> = ({ 
-  projects, 
-  materials, 
-  updateProject, 
-  completeProject,
-  addMaterialToExistingProject,
-  removeMaterialFromExistingProject
-}) => {
+const DetalleTrabajoPendiente: React.FC<PendingWorkDetailProps> = ({ materials, refetchProjects }) => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-  
+
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [editedMaterials, setEditedMaterials] = useState<ProjectMaterial[]>([]);
 
   const [materialToAddId, setMaterialToAddId] = useState<string>('');
   const [materialToAddBudgetedQty, setMaterialToAddBudgetedQty] = useState<number>(1);
+  const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    const foundProject = projects.find(p => p.id === projectId);
-    if (foundProject) {
-      // Ensure local 'project' state is a distinct shallow copy from props
-      setCurrentProject({ ...foundProject }); 
-      // Deep copy materials for local editing state, ensures UI reflects prop changes
-      setEditedMaterials(JSON.parse(JSON.stringify(foundProject.materials)));
-    } else {
-      // If project not found (e.g., after completion and navigating back), redirect
-      console.warn(`Project with ID ${projectId} not found in props. Navigating away.`);
-      navigate('/trabajos-pendientes', { replace: true }); 
-    }
-  }, [projectId, projects, navigate]);
+    const fetchProject = async () => {
+      if (!projectId) {
+        setLoading(false);
+        navigate('/trabajos-pendientes', { replace: true });
+        return;
+      }
+      try {
+        const foundProject = await getProjectById(projectId);
+        if (foundProject) {
+          setCurrentProject({ ...foundProject });
+          setEditedMaterials(JSON.parse(JSON.stringify(foundProject.materials)));
+        } else {
+          console.warn(`Project with ID ${projectId} not found in Firestore. Navigating away.`);
+          navigate('/trabajos-pendientes', { replace: true });
+        }
+      } catch (error) {
+        console.error('Error fetching project from Firestore:', error);
+        // Optionally set an error state and display an error message
+        navigate('/trabajos-pendientes', { replace: true }); // Navigate away on error
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchProject();
+  }, [projectId, navigate]);
 
   const handleMaterialQuantityChange = (materialId: string, newActualQuantityStr: string) => {
     const newActualQuantityRaw = parseInt(newActualQuantityStr, 10);
@@ -60,11 +57,11 @@ const PendingWorkDetail: React.FC<PendingWorkDetailProps> = ({
       )
     );
   };
-  
-  const handleSaveChanges = () => {
+
+  const handleSaveChanges = async () => {
     if (!currentProject) {
         console.error("handleSaveChanges: Local project state not loaded.");
-        alert("Error: No se pudo guardar. El proyecto no está cargado.");
+      navigate('/trabajos-pendientes', { replace: true });
         return;
     }
 
@@ -77,20 +74,26 @@ const PendingWorkDetail: React.FC<PendingWorkDetailProps> = ({
 
     // Construct the updated project data from local state
     const updatedProjectData: Project = {
-      ...currentProject, 
+      ...currentProject,
       materials: editedMaterials, // Use the locally edited materials
     };
-    updateProject(updatedProjectData); 
-    alert("Cambios en cantidades replanteadas guardados. Estos se usarán al finalizar el trabajo.");
-  };
 
-  const handleCompleteWork = () => {
+    try {
+      await updateProjectInFirestore(updatedProjectData.id, { materials: updatedProjectData.materials });
+      alert("Cambios en cantidades replanteadas guardados. Estos se usarán al finalizar el trabajo.");
+      // Optionally refetch the project or update local state from Firestore data
+    } catch (error) {
+      console.error("Error saving changes to Firestore:", error);
+      alert("Error al guardar cambios en Firestore.");
+    }
+  };
+  const handleCompleteWork = async () => {
     if (!currentProject) {
         console.error("handleCompleteWork: Local project state not loaded.");
         alert("Error: No se pudo finalizar. El proyecto no está cargado.");
         return;
     }
-    
+
     // Validate actual quantities before proceeding
     for (const em of editedMaterials) {
       if (typeof em.actualQuantity !== 'number' || em.actualQuantity < 0 || isNaN(em.actualQuantity)) {
@@ -98,13 +101,13 @@ const PendingWorkDetail: React.FC<PendingWorkDetailProps> = ({
         return;
       }
     }
-    
+
     // Validate stock availability (complex validation, ensure it uses correct values)
     for (const projMat of editedMaterials) {
         const stockMaterial = materials.find(m => m.id === projMat.materialId); // Overall stock item
         const originalBudgetedItem = currentProject.materials.find(pm => pm.materialId === projMat.materialId);
         const originalProjectBudgetedQty = originalBudgetedItem ? originalBudgetedItem.budgetedQuantity : 0;
-        
+
         if (stockMaterial) {
             // Effective available = total stock - (total reserved - what *this* project reserved)
             const reservedByOtherProjects = stockMaterial.reserved - originalProjectBudgetedQty;
@@ -121,21 +124,29 @@ const PendingWorkDetail: React.FC<PendingWorkDetailProps> = ({
     }
 
     if (window.confirm("¿Está seguro de que desea marcar este trabajo como finalizado? Esta acción ajustará el stock.")) {
-      completeProject(currentProject.id, editedMaterials); 
-      // Alert moved to App.tsx or not used to avoid issues if navigation happens first
-      // For immediate feedback and to prevent issues with component unmounting:
-      navigate('/trabajos-completados', { replace: true });
+      try {
+        await completeProjectInFirestore(currentProject.id, editedMaterials);
+        // Assuming completeProjectInFirestore handles stock updates and project status
+        await refetchProjects(); // Refetch projects after completing one
+        alert("Trabajo finalizado con éxito. Stock ajustado.");
+        navigate('/trabajos-completados', { replace: true });
+      } catch (error) {
+        console.error("Error completing work in Firestore:", error);
+        alert("Error al finalizar el trabajo en Firestore.");
+      }
     }
   };
 
-  const handleAddMaterialToProjectBudget = () => {
+  const handleAddMaterialToProjectBudget = async () => {
     if (!currentProject || !materialToAddId || materialToAddBudgetedQty <= 0) {
       alert("Seleccione un material y especifique una cantidad presupuestada válida (mayor a 0).");
       return;
     }
     const materialInfo = materials.find(m => m.id === materialToAddId);
     if (!materialInfo) {
-      alert("Material seleccionado no encontrado en el inventario.");
+        console.error(`Material with ID ${materialToAddId} not found in materials prop.`);
+        // Depending on where 'materials' comes from, you might need to fetch it from Firestore here too.
+      alert("Error interno: Material seleccionado no encontrado.");
       return;
     }
     // Check if material is already in the *currentProject's* budget
@@ -145,33 +156,66 @@ const PendingWorkDetail: React.FC<PendingWorkDetailProps> = ({
     }
     // Check availability for reservation
     if (materialToAddBudgetedQty > (materialInfo.stock - materialInfo.reserved)) {
-        alert(`No hay suficiente stock disponible de "${materialInfo.name}" (Disponibles para reservar: ${materialInfo.stock - materialInfo.reserved}) para la cantidad presupuestada ${materialToAddBudgetedQty}.`);
+        alert(`No hay suficiente stock disponible de "${materialInfo.name}" (Disponibles p/ reservar: ${materialInfo.stock - materialInfo.reserved}) para la cantidad presupuestada ${materialToAddBudgetedQty}.`);
         return;
     }
 
-    addMaterialToExistingProject(
-        currentProject.id, 
-        { id: materialInfo.id, name: materialInfo.name, unit: materialInfo.unit },
-        materialToAddBudgetedQty
-    );
-    // Reset form fields for adding material
-    setMaterialToAddId('');
-    setMaterialToAddBudgetedQty(1);
+    const materialDetailsToAdd = {
+      materialId: materialInfo.id,
+      materialName: materialInfo.name,
+      materialUnit: materialInfo.unit,
+      budgetedQuantity: materialToAddBudgetedQty,
+      actualQuantity: 0 // Assuming initial actual quantity is 0
+    };
+
+    try {
+      await addMaterialToProjectInFirestore(currentProject.id, materialDetailsToAdd);
+      await refetchProjects(); // Refetch projects after adding material
+      alert(`"${materialInfo.name}" agregado al presupuesto.`);
+      // Reset form fields and ideally refetch/update project state to reflect changes
+      setMaterialToAddId('');
+      setMaterialToAddBudgetedQty(1);
+      // Refetch the project to update the UI
+      const updatedProject = await getProjectById(currentProject.id);
+      if(updatedProject) setCurrentProject(updatedProject);
+    } catch (error) {
+      console.error("Error adding material to project in Firestore:", error);
+      alert("Error al agregar material al proyecto.");
+    }
   };
 
-  const handleRemoveMaterialFromProjectBudget = (materialIdToRemove: string) => {
+  const handleRemoveMaterialFromProjectBudget = async (materialIdToRemove: string) => {
     if (!currentProject) {
         console.error("handleRemoveMaterialFromProjectBudget: Local project state not loaded.");
         alert("Error: No se pudo quitar el material. El proyecto no está cargado.");
         return;
     }
     const materialName = currentProject.materials.find(pm => pm.materialId === materialIdToRemove)?.materialName || "este material";
+    const materialToRemove = currentProject.materials.find(pm => pm.materialId === materialIdToRemove);
+
+    if (!materialToRemove) {
+        console.error(`Material with ID ${materialIdToRemove} not found in current project's materials.`);
+        alert("Error interno: Material no encontrado en el proyecto.");
+        return;
+    }
+
     if (window.confirm(`¿Está seguro de que desea quitar "${materialName}" del presupuesto de este proyecto? Se liberará la cantidad reservada.`)) {
-      removeMaterialFromExistingProject(currentProject.id, materialIdToRemove);
-      // The useEffect depending on 'projects' prop will update local state and UI
+      try {
+        // Pass the full material object to remove
+        await removeMaterialFromProjectInFirestore(currentProject.id, materialToRemove);
+        await refetchProjects(); // Refetch projects after removing material
+        alert(`"${materialName}" quitado del presupuesto.`);
+        // Refetch the project to update the UI
+        const updatedProject = await getProjectById(currentProject.id);
+        if(updatedProject) setCurrentProject(updatedProject);
+      } catch (error) {
+        console.error("Error removing material from project in Firestore:", error);
+        alert("Error al quitar material del proyecto.");
+      }
     }
   };
-  
+
+
   // Memoize available materials for adding to prevent unnecessary recalculations
   const availableMaterialsForAdding = useMemo(() => {
     if (!currentProject) return [];
@@ -179,9 +223,12 @@ const PendingWorkDetail: React.FC<PendingWorkDetailProps> = ({
     return materials.filter(m => !projectMaterialIds.includes(m.id));
   }, [materials, currentProject]);
 
+ if (loading) {
+    return <div className="text-center py-10 text-gray-700">Cargando detalle del trabajo...</div>;
+  }
 
-  if (!currentProject) {
-    return <div className="text-center py-10 text-gray-700">Cargando detalle del trabajo o proyecto no encontrado...</div>;
+  if (!currentProject && !loading) {
+    return <div className="text-center py-10 text-gray-700">Proyecto no encontrado.</div>;
   }
 
   return (
@@ -268,7 +315,7 @@ const PendingWorkDetail: React.FC<PendingWorkDetailProps> = ({
                   <input
                     type="number"
                     id={`actual-${pm.materialId}`}
-                    value={pm.actualQuantity} 
+                    value={pm.actualQuantity}
                     onChange={(e) => handleMaterialQuantityChange(pm.materialId, e.target.value)}
                     min="0"
                     aria-label={`Cantidad replanteada para ${pm.materialName}`}
@@ -345,4 +392,4 @@ const PendingWorkDetail: React.FC<PendingWorkDetailProps> = ({
   );
 };
 
-export default PendingWorkDetail;
+export default DetalleTrabajoPendiente;

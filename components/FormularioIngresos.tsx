@@ -1,22 +1,39 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Material, MovementItem } from '../types';
 import { ArrowUpTrayIcon, PlusIcon, TrashIcon } from '../constants';
+import { getMaterials, processStockIncome } from '../firebaseService'; // Import Firestore functions
 
 interface IncomeFormProps {
-  materials: Material[];
-  onStockIncome: (itemsToIncome: MovementItem[], incomeDate: string) => void;
 }
 
-const IncomeForm: React.FC<IncomeFormProps> = ({ materials, onStockIncome }) => {
+const FormularioIngresos: React.FC<IncomeFormProps> = () => {
   const navigate = useNavigate();
   const [incomeItems, setIncomeItems] = useState<MovementItem[]>([]);
   const [selectedMaterialId, setSelectedMaterialId] = useState<string>('');
   const [quantity, setQuantity] = useState<number>(1);
   const [incomeDate, setIncomeDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [materials, setMaterials] = useState<Material[]>([]); // State for materials
+  const [loading, setLoading] = useState<boolean>(true); // State for initial material loadi; // State for initial material loading
+  const [submitting, setSubmitting] = useState<boolean>(false); // State for form submission
+
+  useEffect(() => {
+    const fetchMaterials = async () => {      try {
+        const materialsData = await getMaterials();
+        setMaterials(materialsData);
+      } catch (error) {
+        console.error('Error fetching materials:', error);
+        // Handle error appropriately (e.g., show error message)
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchMaterials();
+  }, []); // Empty dependency array means this runs once on mount
 
   const handleAddMaterialToList = () => {
+
     if (!selectedMaterialId) {
       alert("Por favor, seleccione un material.");
       return;
@@ -49,7 +66,7 @@ const IncomeForm: React.FC<IncomeFormProps> = ({ materials, onStockIncome }) => 
     setIncomeItems(prev => prev.filter(item => item.materialId !== materialId));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (incomeItems.length === 0) {
       alert("Por favor, agregue al menos un material a la lista de ingresos.");
@@ -59,13 +76,24 @@ const IncomeForm: React.FC<IncomeFormProps> = ({ materials, onStockIncome }) => 
       alert("Por favor, seleccione una fecha de ingreso.");
       return;
     }
-    
-    onStockIncome(incomeItems, incomeDate);
-    alert(`Ingreso de ${incomeItems.length} tipo(s) de material(es) registrado exitosamente para la fecha ${new Date(incomeDate).toLocaleDateString()}.`);
-    setIncomeItems([]);
-    setSelectedMaterialId('');
-    setQuantity(1);
-    setIncomeDate(new Date().toISOString().split('T')[0]);
+
+    setSubmitting(true);
+    try {
+      await processStockIncome(incomeItems, incomeDate);
+      alert(`Ingreso de ${incomeItems.length} tipo(s) de material(es) registrado exitosamente para la fecha ${new Date(incomeDate).toLocaleDateString()}.`);
+      setIncomeItems([]);
+      setSelectedMaterialId('');
+      setQuantity(1);
+      setIncomeDate(new Date().toISOString().split('T')[0]);
+      // Optionally refetch materials to update stock display elsewhere
+      const materialsData = await getMaterials();
+      setMaterials(materialsData);
+    } catch (error) {
+      console.error('Error processing stock income:', error);
+      alert('Hubo un error al registrar el ingreso de materiales. Por favor, inténtelo de nuevo.');
+    } finally {
+      setSubmitting(false);
+    }
     // navigate('/'); 
   };
 
@@ -75,6 +103,11 @@ const IncomeForm: React.FC<IncomeFormProps> = ({ materials, onStockIncome }) => 
       
       <div className="space-y-4 border-b border-gray-200 pb-6 mb-6">
         <h2 className="text-xl font-semibold text-gray-700">Agregar Material al Ingreso</h2>
+         {loading ? (
+           <p className="text-center text-gray-500">Cargando materiales...</p>
+         ) : materials.length === 0 ? (
+           <p className="text-center text-gray-500">No hay materiales registrados para ingresar.</p>
+         ) : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
           <div className="md:col-span-2">
             <label htmlFor="material" className="block text-sm font-medium text-gray-700">Material</label>
@@ -104,6 +137,7 @@ const IncomeForm: React.FC<IncomeFormProps> = ({ materials, onStockIncome }) => 
             />
           </div>
         </div>
+         )}
          <button
             type="button"
             onClick={handleAddMaterialToList}
@@ -161,7 +195,7 @@ const IncomeForm: React.FC<IncomeFormProps> = ({ materials, onStockIncome }) => 
           </button>
           <button
             type="submit"
-            disabled={incomeItems.length === 0}
+            disabled={incomeItems.length === 0 || submitting}
             className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <ArrowUpTrayIcon className="w-5 h-5 mr-2" /> Registrar Ingreso Total
@@ -172,4 +206,4 @@ const IncomeForm: React.FC<IncomeFormProps> = ({ materials, onStockIncome }) => 
   );
 };
 
-export default IncomeForm;
+export default FormularioIngresos;
